@@ -7,7 +7,7 @@ services:
     container_name: vt-hash-checker
     restart: unless-stopped
     ports:
-      - "8000:8000"   # если поставите nginx/Caddy перед сервисом: "127.0.0.1:8000:8000"
+      - "443:8000"   # если поставите nginx/Caddy перед сервисом: "127.0.0.1:8000:8000"
     env_file:
       - .env
     volumes:
