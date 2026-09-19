@@ -1,0 +1,12 @@
+services:
+  vt-hash-checker:
+    build: .
+    container_name: vt-hash-checker
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+      - ./logs:/logs

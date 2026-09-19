@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VT Hash Checker</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>VT Hash Checker</h1>
+    <p>Поиск существующего отчёта VirusTotal по MD5 / SHA-1 / SHA-256</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="card search">
+    <form method="post" action="/lookup">
+      <label for="hash_value">Хэш файла</label>
+      <div class="search-row">
+        <input id="hash_value" name="hash_value" value="{{ hash_value }}" placeholder="SHA-256, SHA-1 или MD5" autocomplete="off" required>
+        <button type="submit">Проверить</button>
+      </div>
+      <small>Локальный кэш: {{ 7 }} суток. Лимит новых запросов приложения: {{ requests_per_hour }}/час.</small>
+    </form>
+  </section>
+
+  {% if error %}
+  <section class="alert">{{ error }}</section>
+  {% endif %}
+
+  {% if result %}
+  <section class="card">
+    <div class="result-head">
+      <div>
+        <span class="muted">Результат</span>
+        <h2 class="mono">{{ result_hash }}</h2>
+      </div>
+      <a class="external" href="https://www.virustotal.com/gui/file/{{ result_hash }}" target="_blank" rel="noopener">Открыть в VirusTotal ↗</a>
+    </div>
+
+    <div class="stats">
+      <div class="stat danger"><b>{{ result.stats.malicious }}</b><span>Malicious</span></div>
+      <div class="stat warn"><b>{{ result.stats.suspicious }}</b><span>Suspicious</span></div>
+      <div class="stat"><b>{{ result.stats.undetected }}</b><span>Undetected</span></div>
+      <div class="stat"><b>{{ result.stats.harmless }}</b><span>Harmless</span></div>
+      <div class="stat"><b>{{ result.stats.timeout }}</b><span>Timeout</span></div>
+    </div>
+
+    <div class="facts">
+      <div><span>Тип</span><b>{{ result.type_description or "—" }}</b></div>
+      <div><span>Размер</span><b>{{ result.size or "—" }}</b></div>
+      <div><span>Reputation</span><b>{{ result.reputation if result.reputation is not none else "—" }}</b></div>
+      <div><span>Имя</span><b>{{ result.meaningful_name or "—" }}</b></div>
+      <div><span>Отправок</span><b>{{ result.times_submitted or "—" }}</b></div>
+    </div>
+
+    <h3>Результаты движков</h3>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Engine</th><th>Category</th><th>Result</th><th>Version</th><th>Update</th></tr></thead>
+        <tbody>
+        {% for e in result.engines %}
+          <tr>
+            <td>{{ e.engine }}</td>
+            <td><span class="badge {{ e.category }}">{{ e.category or "—" }}</span></td>
+            <td>{{ e.result or "—" }}</td>
+            <td>{{ e.version or "—" }}</td>
+            <td>{{ e.update or "—" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h3>Комментарии к {{ result_hash }}</h3>
+    <form method="post" action="/comments" class="comment-form">
+      <input type="hidden" name="hash_value" value="{{ result_hash }}">
+      <input name="author" placeholder="Имя" maxlength="80">
+      <textarea name="text" placeholder="Комментарий..." maxlength="4000" required></textarea>
+      <button type="submit">Добавить</button>
+    </form>
+    {% for c in result_comments %}
+      <article class="comment"><b>{{ c.author }}</b><time>{{ c.created_at }}</time><p>{{ c.text }}</p></article>
+    {% else %}
+      <p class="muted">Комментариев пока нет.</p>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <div class="grid">
+    <section class="card">
+      <h3>История запросов</h3>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th>Время</th><th>Hash</th><th>Тип</th><th>Статус</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>{{ r.requested_at }}</td>
+            <td><a class="mono hashlink" href="/?hash={{ r.hash }}">{{ r.hash }}</a></td>
+            <td>{{ r.algorithm }}</td>
+            <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="muted">История пуста.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Последние комментарии</h3>
+      {% for c in comments %}
+        <article class="comment">
+          <div><b>{{ c.author }}</b> <time>{{ c.created_at }}</time></div>
+          <a class="mono hashlink" href="/?hash={{ c.hash }}">{{ c.hash }}</a>
+          <p>{{ c.text }}</p>
+        </article>
+      {% else %}
+        <p class="muted">Комментариев пока нет.</p>
+      {% endfor %}
+    </section>
+  </div>
+</main>
+</body>
+</html>

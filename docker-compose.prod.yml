@@ -1,0 +1,15 @@
+# Compose-файл для сервера: образ берётся из реестра, а не собирается на месте.
+# IMAGE и TAG передаёт пайплайн при деплое. Для ручного запуска:
+#   IMAGE=ghcr.io/owner/repo docker compose up -d
+services:
+  vt-hash-checker:
+    image: ${IMAGE}:${TAG:-latest}
+    container_name: vt-hash-checker
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # если поставите nginx/Caddy перед сервисом: "127.0.0.1:8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+      - ./logs:/logs

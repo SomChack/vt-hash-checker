@@ -1,0 +1,10 @@
+# Секреты и данные никогда не должны попадать в git
+.env
+data/
+logs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.sqlite3
