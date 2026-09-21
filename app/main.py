@@ -123,10 +123,20 @@ def cleanup_old_data(db: Session) -> None:
     db.commit()
 
 
+def _top_values(items, limit: int = 4) -> list[dict]:
+    """Первые элементы списка {value, count} из popular_threat_classification."""
+    out = []
+    for item in (items or [])[:limit]:
+        if isinstance(item, dict) and item.get("value"):
+            out.append({"value": str(item["value"]), "count": int(item.get("count", 0) or 0)})
+    return out
+
+
 def parse_report(payload: dict) -> dict:
     attrs = payload.get("data", {}).get("attributes", {})
     stats = attrs.get("last_analysis_stats") or {}
     results = attrs.get("last_analysis_results") or {}
+    threat = attrs.get("popular_threat_classification") or {}
 
     engines = []
     for name, item in sorted(results.items(), key=lambda x: x[0].lower()):
@@ -156,8 +166,131 @@ def parse_report(payload: dict) -> dict:
         "first_submission_date": attrs.get("first_submission_date"),
         "last_analysis_date": attrs.get("last_analysis_date"),
         "times_submitted": attrs.get("times_submitted"),
+        # Все имена файла, под которыми его загружали пользователи.
+        # Предохранитель 2000 нужен только на случай аномально длинных списков.
+        "names": [str(n) for n in (attrs.get("names") or []) if n][:2000],
+        # Популярная метка угрозы, категории и семейства (как на странице VirusTotal)
+        "threat_label": threat.get("suggested_threat_label"),
+        "threat_categories": _top_values(threat.get("popular_threat_category")),
+        "threat_names": _top_values(threat.get("popular_threat_name")),
         "engines": engines,
     }
+
+
+def summarize_result(result: dict | None) -> dict | None:
+    """Компактная сводка отчёта для интерфейса: счётчик, кольцо, имя файла, метка угрозы.
+
+    Знаменатель считается как в VirusTotal: движки, которые дали вердикт
+    (malicious + suspicious + undetected + harmless). Таймауты и неподдерживаемые
+    типы файлов в него не входят.
+    """
+    if not result:
+        return None
+    stats = result.get("stats") or {}
+    malicious = int(stats.get("malicious", 0) or 0)
+    suspicious = int(stats.get("suspicious", 0) or 0)
+    undetected = int(stats.get("undetected", 0) or 0)
+    harmless = int(stats.get("harmless", 0) or 0)
+    total = malicious + suspicious + undetected + harmless
+
+    def pct(value: int) -> float:
+        return round(value * 100 / total, 2) if total else 0.0
+
+    names = [n for n in (result.get("names") or []) if n]
+    file_name = result.get("meaningful_name") or (names[0] if names else None)
+
+    if not total:
+        verdict = "unknown"
+    elif malicious:
+        verdict = "malicious"
+    elif suspicious:
+        verdict = "suspicious"
+    else:
+        verdict = "clean"
+
+    return {
+        "malicious": malicious,
+        "suspicious": suspicious,
+        "total": total,
+        "verdict": verdict,
+        "ring_malicious": pct(malicious),      # доли кольца в процентах
+        "ring_suspicious": pct(suspicious),
+        "file_name": file_name,
+        "names": names,
+        "names_known": "names" in result,      # у старых записей кэша этого поля нет
+        "other_names": [n for n in names if n != file_name],
+        "threat_label": result.get("threat_label"),
+        "threat_categories": result.get("threat_categories") or [],
+        "threat_names": result.get("threat_names") or [],
+    }
+
+
+def _load_summary(row: HashRequest) -> dict | None:
+    if row.status != "ok" or not row.result_json:
+        return None
+    try:
+        return summarize_result(json.loads(row.result_json))
+    except ValueError:
+        return None
+
+
+def build_history(db: Session) -> list[dict]:
+    """История запросов вместе со сводкой отчёта и комментариями по каждому хэшу."""
+    requests_ = db.scalars(
+        select(HashRequest).order_by(HashRequest.requested_at.desc()).limit(MAX_HISTORY)
+    ).all()
+    by_hash: dict[str, list[Comment]] = {}
+    for c in db.scalars(select(Comment).order_by(Comment.created_at.desc())).all():
+        by_hash.setdefault(c.hash, []).append(c)
+    return [
+        {
+            "requested_at": r.requested_at,
+            "hash": r.hash,
+            "algorithm": r.algorithm,
+            "status": r.status,
+            "summary": _load_summary(r),
+            "comments": by_hash.get(r.hash, []),
+        }
+        for r in requests_
+    ]
+
+
+def comments_for(db: Session, file_hash: str) -> list[Comment]:
+    return db.scalars(
+        select(Comment).where(Comment.hash == file_hash).order_by(Comment.created_at.desc())
+    ).all()
+
+
+def latest_summaries(db: Session, hashes: set[str]) -> dict[str, dict]:
+    """Сводка последнего успешного отчёта для каждого хэша из набора."""
+    if not hashes:
+        return {}
+    rows = db.scalars(
+        select(HashRequest)
+        .where(HashRequest.hash.in_(hashes), HashRequest.status == "ok", HashRequest.result_json.is_not(None))
+        .order_by(HashRequest.requested_at.desc())
+    ).all()
+    out: dict[str, dict] = {}
+    for r in rows:
+        if r.hash not in out:
+            summary = _load_summary(r)
+            if summary:
+                out[r.hash] = summary
+    return out
+
+
+def _static_version(filename: str) -> str:
+    """Короткий хэш содержимого файла для параметра ?v= (сброс кэша браузера при изменении)."""
+    try:
+        with open(os.path.join("app", "static", filename), "rb") as f:
+            return hashlib.md5(f.read()).hexdigest()[:10]
+    except OSError:
+        return "0"
+
+
+templates.env.globals["summarize"] = summarize_result
+templates.env.globals["cache_days"] = CACHE_TTL_DAYS
+templates.env.globals["css_version"] = _static_version("style.css")
 
 
 async def query_virustotal(file_hash: str) -> tuple[str, dict | None, str | None]:
@@ -206,12 +339,7 @@ def index(request: Request, hash_value: str = Query("", alias="hash")):
 
     with SessionLocal() as db:
         cleanup_old_data(db)
-        rows = db.scalars(
-            select(HashRequest).order_by(HashRequest.requested_at.desc()).limit(MAX_HISTORY)
-        ).all()
-        comments = db.scalars(
-            select(Comment).order_by(Comment.created_at.desc()).limit(MAX_HISTORY)
-        ).all()
+        rows = build_history(db)
 
         # Открытие анализа по ссылке из истории: берём данные из локального кэша,
         # новый запрос к VirusTotal здесь не делаем (GET без побочных эффектов).
@@ -235,11 +363,7 @@ def index(request: Request, hash_value: str = Query("", alias="hash")):
                 if cached:
                     result = json.loads(cached.result_json)
                     result_hash = file_hash
-                    result_comments = db.scalars(
-                        select(Comment)
-                        .where(Comment.hash == file_hash)
-                        .order_by(Comment.created_at.desc())
-                    ).all()
+                    result_comments = comments_for(db, file_hash)
                 else:
                     last = db.scalar(
                         select(HashRequest)
@@ -255,7 +379,6 @@ def index(request: Request, hash_value: str = Query("", alias="hash")):
         {
             "request": request,
             "rows": rows,
-            "comments": comments,
             "result": result,
             "error": error,
             "hash_value": hash_value,
@@ -268,7 +391,7 @@ def index(request: Request, hash_value: str = Query("", alias="hash")):
 
 
 @app.post("/lookup", response_class=HTMLResponse)
-async def lookup(request: Request, hash_value: str = Form(...)):
+async def lookup(request: Request, hash_value: str = Form(...), refresh: str = Form("")):
     with SessionLocal() as db:
         cleanup_old_data(db)
 
@@ -277,7 +400,7 @@ async def lookup(request: Request, hash_value: str = Form(...)):
         except ValueError as exc:
             return templates.TemplateResponse(
                 "index.html",
-                {"request": request, "rows": [], "comments": [], "result": None,
+                {"request": request, "rows": build_history(db), "result": None,
                  "error": str(exc), "hash_value": hash_value, "requests_per_hour": REQUESTS_PER_HOUR},
                 status_code=400,
             )
@@ -287,25 +410,28 @@ async def lookup(request: Request, hash_value: str = Form(...)):
             .where(HashRequest.hash == file_hash, HashRequest.expires_at >= utcnow(), HashRequest.status == "ok")
             .order_by(HashRequest.requested_at.desc())
         )
-        if cached and cached.result_json:
-            result = json.loads(cached.result_json)
+        # Кэш не используем, если пользователь нажал «Обновить» или запись сохранена
+        # старой версией приложения (в ней нет поля names: не было имён и метки угрозы).
+        cached_result = None
+        if cached and cached.result_json and not refresh:
+            candidate = json.loads(cached.result_json)
+            if "names" in candidate:
+                cached_result = candidate
+
+        if cached_result is not None:
+            result = cached_result
             logger.info("Cache hit hash=%s", file_hash)
-            comments = db.scalars(select(Comment).where(Comment.hash == file_hash).order_by(Comment.created_at.desc())).all()
-            rows = db.scalars(select(HashRequest).order_by(HashRequest.requested_at.desc()).limit(MAX_HISTORY)).all()
-            all_comments = db.scalars(select(Comment).order_by(Comment.created_at.desc()).limit(MAX_HISTORY)).all()
             return templates.TemplateResponse("index.html", {
-                "request": request, "rows": rows, "comments": all_comments,
+                "request": request, "rows": build_history(db),
                 "result": result, "error": None, "hash_value": file_hash,
-                "result_hash": file_hash, "result_comments": comments,
+                "result_hash": file_hash, "result_comments": comments_for(db, file_hash),
                 "requests_per_hour": REQUESTS_PER_HOUR,
             })
 
         if not await acquire_rate_slot():
             logger.warning("Application rate limit reached hash=%s", file_hash)
-            rows = db.scalars(select(HashRequest).order_by(HashRequest.requested_at.desc()).limit(MAX_HISTORY)).all()
-            comments = db.scalars(select(Comment).order_by(Comment.created_at.desc()).limit(MAX_HISTORY)).all()
             return templates.TemplateResponse("index.html", {
-                "request": request, "rows": rows, "comments": comments, "result": None,
+                "request": request, "rows": build_history(db), "result": None,
                 "error": f"Локальный лимит: не более {REQUESTS_PER_HOUR} новых запросов в час.",
                 "hash_value": file_hash, "requests_per_hour": REQUESTS_PER_HOUR,
             }, status_code=429)
@@ -327,16 +453,27 @@ async def lookup(request: Request, hash_value: str = Form(...)):
 
         logger.info("Lookup hash=%s algorithm=%s status=%s", file_hash, algorithm, status)
 
-        rows = db.scalars(select(HashRequest).order_by(HashRequest.requested_at.desc()).limit(MAX_HISTORY)).all()
-        comments = db.scalars(select(Comment).order_by(Comment.created_at.desc()).limit(MAX_HISTORY)).all()
-        result_comments = db.scalars(select(Comment).where(Comment.hash == file_hash).order_by(Comment.created_at.desc())).all()
-
         return templates.TemplateResponse("index.html", {
-            "request": request, "rows": rows, "comments": comments,
+            "request": request, "rows": build_history(db),
             "result": result, "error": error, "hash_value": file_hash,
-            "result_hash": file_hash, "result_comments": result_comments,
+            "result_hash": file_hash, "result_comments": comments_for(db, file_hash),
             "requests_per_hour": REQUESTS_PER_HOUR,
         })
+
+
+@app.get("/comments", response_class=HTMLResponse)
+def comments_page(request: Request):
+    """Вкладка «Комментарии»: все комментарии с именем файла и счётчиком детектов."""
+    with SessionLocal() as db:
+        cleanup_old_data(db)
+        items = db.scalars(select(Comment).order_by(Comment.created_at.desc()).limit(MAX_HISTORY)).all()
+        summaries = latest_summaries(db, {c.hash for c in items})
+        entries = [
+            {"author": c.author, "text": c.text, "created_at": c.created_at,
+             "hash": c.hash, "summary": summaries.get(c.hash)}
+            for c in items
+        ]
+    return templates.TemplateResponse("comments.html", {"request": request, "entries": entries})
 
 
 @app.post("/comments")

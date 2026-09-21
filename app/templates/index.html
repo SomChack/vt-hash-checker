@@ -1,20 +1,11 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>VT Hash Checker</title>
-  <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-<header class="top">
-  <div>
-    <h1>VT Hash Checker</h1>
-    <p>Поиск существующего отчёта VirusTotal по MD5 / SHA-1 / SHA-256</p>
-  </div>
-</header>
+{% extends "base.html" %}
+{% import "macros.html" as m %}
 
-<main class="wrap">
+{% block title %}Проверка хэша · VT Hash Checker{% endblock %}
+{% block heading %}Проверка хэша{% endblock %}
+{% block subheading %}Поиск существующего отчёта VirusTotal по MD5 / SHA-1 / SHA-256{% endblock %}
+
+{% block content %}
   <section class="card search">
     <form method="post" action="/lookup">
       <label for="hash_value">Хэш файла</label>
@@ -22,7 +13,7 @@
         <input id="hash_value" name="hash_value" value="{{ hash_value }}" placeholder="SHA-256, SHA-1 или MD5" autocomplete="off" required>
         <button type="submit">Проверить</button>
       </div>
-      <small>Локальный кэш: {{ 7 }} суток. Лимит новых запросов приложения: {{ requests_per_hour }}/час.</small>
+      <small>Локальный кэш: {{ cache_days }} суток. Лимит новых запросов приложения: {{ requests_per_hour }}/час.</small>
     </form>
   </section>
 
@@ -31,13 +22,53 @@
   {% endif %}
 
   {% if result %}
+  {% set s = summarize(result) %}
   <section class="card">
     <div class="result-head">
       <div>
         <span class="muted">Результат</span>
         <h2 class="mono">{{ result_hash }}</h2>
       </div>
-      <a class="external" href="https://www.virustotal.com/gui/file/{{ result_hash }}" target="_blank" rel="noopener">Открыть в VirusTotal ↗</a>
+      <div class="result-actions">
+        <form method="post" action="/lookup">
+          <input type="hidden" name="hash_value" value="{{ result_hash }}">
+          <input type="hidden" name="refresh" value="1">
+          <button type="submit" class="secondary" title="Запросить свежий отчёт у VirusTotal (тратит один запрос из лимита)">Обновить из VirusTotal</button>
+        </form>
+        <a class="external" href="https://www.virustotal.com/gui/file/{{ result_hash }}" target="_blank" rel="noopener">Открыть в VirusTotal ↗</a>
+      </div>
+    </div>
+
+    <div class="verdict">
+      {{ m.ring(s) }}
+      <div class="verdict-body">
+        <p class="verdict-line {{ s.verdict }}">
+          {% if s.verdict == 'malicious' %}{{ s.malicious }} из {{ s.total }} движков считают файл вредоносным
+          {% elif s.verdict == 'suspicious' %}Вредоносным файл не признан, но {{ s.suspicious }} из {{ s.total }} движков считают его подозрительным
+          {% elif s.verdict == 'clean' %}Ни один из {{ s.total }} движков не признал файл вредоносным
+          {% else %}Движки не вернули вердикт{% endif %}
+        </p>
+        <div class="kv">
+          <span class="k">Метка угрозы</span>
+          <span class="v">{% if s.threat_label %}<span class="chip threat">{{ s.threat_label }}</span>{% elif not s.names_known %}<span class="muted">не сохранена: отчёт получен старой версией приложения</span>{% else %}<span class="muted">VirusTotal не вернул метку для этого файла</span>{% endif %}</span>
+        </div>
+        {% if s.threat_categories %}
+        <div class="kv">
+          <span class="k">Категории</span>
+          <span class="v">{% for t in s.threat_categories %}<span class="chip">{{ t.value }}<b>{{ t.count }}</b></span>{% endfor %}</span>
+        </div>
+        {% endif %}
+        {% if s.threat_names %}
+        <div class="kv">
+          <span class="k">Семейства</span>
+          <span class="v">{% for t in s.threat_names %}<span class="chip">{{ t.value }}<b>{{ t.count }}</b></span>{% endfor %}</span>
+        </div>
+        {% endif %}
+        <div class="kv">
+          <span class="k">Имя файла</span>
+          <span class="v">{{ s.file_name or "—" }}</span>
+        </div>
+      </div>
     </div>
 
     <div class="stats">
@@ -56,6 +87,18 @@
       <div><span>Отправок</span><b>{{ result.times_submitted or "—" }}</b></div>
     </div>
 
+    <section class="names">
+      <h3>Другие имена файла{% if s.other_names %} ({{ s.other_names|length }}){% endif %}</h3>
+      {% if not s.names_known %}
+        <p class="muted">Имена не сохранены: этот отчёт получен старой версией приложения. Нажмите «Обновить из VirusTotal».</p>
+      {% elif s.other_names %}
+        <p class="muted">Все имена, под которыми файл загружали в VirusTotal (данные VirusTotal). Список прокручивается.</p>
+        <div class="names-list" tabindex="0" role="region" aria-label="Другие имена файла">{% for n in s.other_names %}<span class="chip name">{{ n }}</span>{% endfor %}</div>
+      {% else %}
+        <p class="muted">VirusTotal не знает других имён этого файла.</p>
+      {% endif %}
+    </section>
+
     <h3>Результаты движков</h3>
     <div class="table-scroll">
       <table>
@@ -66,8 +109,8 @@
             <td>{{ e.engine }}</td>
             <td><span class="badge {{ e.category }}">{{ e.category or "—" }}</span></td>
             <td>{{ e.result or "—" }}</td>
-            <td>{{ e.version or "—" }}</td>
-            <td>{{ e.update or "—" }}</td>
+            <td>{{ e['version'] or "—" }}</td>
+            <td>{{ e['update'] or "—" }}</td>
           </tr>
         {% endfor %}
         </tbody>
@@ -91,41 +134,41 @@
   </section>
   {% endif %}
 
-  <div class="grid">
-    <section class="card">
-      <h3>История запросов</h3>
-      <div class="table-scroll">
+  <section class="card">
+    <h3>История запросов</h3>
+    <div class="table-scroll">
       <table>
-        <thead><tr><th>Время</th><th>Hash</th><th>Тип</th><th>Статус</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Время</th><th>Hash</th><th>Тип</th><th>Статус</th>
+            <th>Детекты</th><th>Файл</th><th>Метка угрозы</th><th>Комментарии</th>
+          </tr>
+        </thead>
         <tbody>
         {% for r in rows %}
+          {% set sm = r.summary %}
           <tr>
-            <td>{{ r.requested_at }}</td>
-            <td><a class="mono hashlink" href="/?hash={{ r.hash }}">{{ r.hash }}</a></td>
+            <td>{{ r.requested_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td><a class="mono hashlink" href="/?hash={{ r.hash }}" title="{{ r.hash }}">{{ r.hash[:10] }}…{{ r.hash[-6:] }}</a></td>
             <td>{{ r.algorithm }}</td>
             <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+            <td>{{ m.score(sm) }}</td>
+            <td class="cell-file">{% if sm and sm.file_name %}<span title="{{ sm.file_name }}">{{ sm.file_name }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{% if sm and sm.threat_label %}<span class="chip threat">{{ sm.threat_label }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td class="cell-comments">
+              {% if r.comments %}
+              <div class="mini-comments" tabindex="0" role="region" aria-label="Комментарии к {{ r.hash }}">
+                {% for c in r.comments %}<p><b>{{ c.author }}:</b> {{ c.text }}</p>{% endfor %}
+              </div>
+              {% if r.comments|length > 1 %}<div class="muted more">Всего {{ r.comments|length }}, прокрутите список</div>{% endif %}
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
           </tr>
         {% else %}
-          <tr><td colspan="4" class="muted">История пуста.</td></tr>
+          <tr><td colspan="8" class="muted">История пуста.</td></tr>
         {% endfor %}
         </tbody>
       </table>
-      </div>
-    </section>
-
-    <section class="card">
-      <h3>Последние комментарии</h3>
-      {% for c in comments %}
-        <article class="comment">
-          <div><b>{{ c.author }}</b> <time>{{ c.created_at }}</time></div>
-          <a class="mono hashlink" href="/?hash={{ c.hash }}">{{ c.hash }}</a>
-          <p>{{ c.text }}</p>
-        </article>
-      {% else %}
-        <p class="muted">Комментариев пока нет.</p>
-      {% endfor %}
-    </section>
-  </div>
-</main>
-</body>
-</html>
+    </div>
+  </section>
+{% endblock %}
