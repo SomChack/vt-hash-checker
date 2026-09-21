@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+
+{% block title %}Комментарии · VT Hash Checker{% endblock %}
+{% block heading %}Комментарии{% endblock %}
+{% block subheading %}Заметки к проверенным хэшам. Новый комментарий добавляется под результатом проверки.{% endblock %}
+
+{% block content %}
+  <section class="card">
+    {% for c in entries %}
+      {% set sm = c.summary %}
+      <article class="comment-item">
+        <div class="ci-head">
+          {{ m.score(sm) }}
+          <span class="ci-file">{% if sm and sm.file_name %}{{ sm.file_name }}{% else %}<span class="muted">Имя файла неизвестно</span>{% endif %}</span>
+          {% if sm and sm.threat_label %}<span class="chip threat">{{ sm.threat_label }}</span>{% endif %}
+        </div>
+        <a class="mono hashlink ci-hash" href="/?hash={{ c.hash }}">{{ c.hash }}</a>
+        <div class="ci-meta"><b>{{ c.author }}</b> <time>{{ c.created_at.strftime('%Y-%m-%d %H:%M') }}</time></div>
+        <p class="ci-text">{{ c.text }}</p>
+      </article>
+    {% else %}
+      <p class="muted">Комментариев пока нет. Проверьте хэш и добавьте первый комментарий под результатом.</p>
+      <p><a class="hashlink" href="/">Перейти к проверке хэша</a></p>
+    {% endfor %}
+  </section>
+{% endblock %}

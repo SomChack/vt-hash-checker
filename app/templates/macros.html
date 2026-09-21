@@ -1,0 +1,31 @@
+{# Счётчик детектов вида 43/71: красный, если есть срабатывания, зелёный, если нет #}
+{% macro score(s) -%}
+  {%- if s and s.total -%}
+    <span class="score {{ 'bad' if s.malicious else 'good' }}" title="{{ s.malicious }} из {{ s.total }} движков считают файл вредоносным">{{ s.malicious }}/{{ s.total }}</span>
+  {%- else -%}
+    <span class="muted">—</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{# Кольцо как на VirusTotal: красная дуга = malicious, жёлтая = suspicious, остальное серое.
+   Длина дуги считается от длины окружности (2·π·50 ≈ 314.16), поэтому работает во всех браузерах.
+   Размеры и цвета заданы атрибутами SVG: даже если CSS не загрузился, рисунок не растягивается. #}
+{% macro ring(s) %}
+{% set C = 314.16 %}
+{% set mal = (s.ring_malicious * C / 100)|round(2) %}
+{% set sus = (s.ring_suspicious * C / 100)|round(2) %}
+<svg class="ring" width="136" height="136" viewBox="0 0 120 120" role="img"
+     aria-label="{{ s.malicious }} из {{ s.total }} движков считают файл вредоносным">
+  <g transform="rotate(-90 60 60)" fill="none" stroke-width="11">
+    <circle cx="60" cy="60" r="50" stroke="#e3e8ec"/>
+    {% if sus %}
+    <circle cx="60" cy="60" r="50" stroke="#f0a81c" stroke-dasharray="{{ sus }} {{ C }}" stroke-dashoffset="-{{ mal }}"/>
+    {% endif %}
+    {% if mal %}
+    <circle cx="60" cy="60" r="50" stroke="#d92d20" stroke-dasharray="{{ mal }} {{ C }}"/>
+    {% endif %}
+  </g>
+  <text x="60" y="63" text-anchor="middle" font-size="36" font-weight="700" fill="{{ '#b3261e' if s.malicious else '#14672c' }}">{{ s.malicious }}</text>
+  <text x="60" y="83" text-anchor="middle" font-size="14" fill="#6d7984">/ {{ s.total }}</text>
+</svg>
+{% endmacro %}
