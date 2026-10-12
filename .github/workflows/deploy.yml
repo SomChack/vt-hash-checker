@@ -71,10 +71,11 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-      - name: Upload compose file
+      - name: Upload compose file and nginx config
         run: |
-          ssh "$SSH_USER@$SSH_HOST" "mkdir -p $DEPLOY_PATH"
+          ssh "$SSH_USER@$SSH_HOST" "mkdir -p $DEPLOY_PATH/nginx/templates $DEPLOY_PATH/certbot/www $DEPLOY_PATH/certbot/conf"
           scp docker-compose.prod.yml "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/docker-compose.yml"
+          scp nginx/templates/default.conf.template "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/nginx/templates/default.conf.template"
 
       # Токен уходит на сервер через stdin (не попадает в аргументы и логи)
       # и нужен только чтобы сервер мог скачать образ из приватного GHCR.
@@ -91,4 +92,5 @@ jobs:
              && export IMAGE=$IMAGE TAG=$TAG \
              && docker compose pull \
              && docker compose up -d \
+             && (docker compose exec -T nginx nginx -s reload || docker compose restart nginx) \
              && docker image prune -f"

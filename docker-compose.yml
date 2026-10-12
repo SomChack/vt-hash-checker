@@ -1,12 +1,47 @@
+# Локальная сборка: FastAPI за nginx, HTTPS через self-signed сертификат.
+# Перед первым запуском сгенерируйте сертификат:
+#   ./scripts/generate-selfsigned-cert.sh
+# Затем: docker compose up -d --build
 services:
   vt-hash-checker:
     build: .
     container_name: vt-hash-checker
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    # Порт 8000 наружу не публикуется: к приложению ходит только nginx по внутренней сети.
+    expose:
+      - "8000"
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-server-header
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - "*"
     env_file:
       - .env
     volumes:
       - ./data:/data
       - ./logs:/logs
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: vt-hash-checker-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SERVER_NAME: "_"
+      SSL_CERT: /etc/nginx/certs/selfsigned.crt
+      SSL_CERT_KEY: /etc/nginx/certs/selfsigned.key
+      APP_UPSTREAM: vt-hash-checker:8000
+      HSTS_MAX_AGE: "0"          # локально HSTS не включаем (self-signed)
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - vt-hash-checker

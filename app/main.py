@@ -12,8 +12,10 @@ from fastapi import FastAPI, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import DateTime, Integer, String, Text, create_engine, select
+from sqlalchemy import DateTime, Integer, String, Text, create_engine, delete, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+
+from app import security
 
 APP_NAME = "VT Hash Checker"
 VT_BASE = "https://www.virustotal.com/api/v3"
@@ -24,6 +26,9 @@ LOG_PATH = os.getenv("LOG_PATH", "/logs/app.log")
 CACHE_TTL_DAYS = int(os.getenv("CACHE_TTL_DAYS", "7"))
 REQUESTS_PER_HOUR = int(os.getenv("REQUESTS_PER_HOUR", "20"))
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "1000"))
+ENABLE_DOCS = os.getenv("ENABLE_DOCS", "0") == "1"      # Swagger/ReDoc только для разработки
+MAX_COMMENTS_PER_HASH = int(os.getenv("MAX_COMMENTS_PER_HASH", "100"))
+MAX_COMMENTS_TOTAL = int(os.getenv("MAX_COMMENTS_TOTAL", "5000"))
 
 db_dir = os.path.dirname(DB_PATH)
 if db_dir:
@@ -76,7 +81,13 @@ class Comment(Base):
 
 Base.metadata.create_all(engine)
 
-app = FastAPI(title=APP_NAME)
+app = FastAPI(
+    title=APP_NAME,
+    docs_url="/docs" if ENABLE_DOCS else None,
+    redoc_url="/redoc" if ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_DOCS else None,
+)
+security.install(app)   # заголовки безопасности, проверка Origin, per-IP лимиты
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
@@ -113,13 +124,9 @@ async def acquire_rate_slot() -> bool:
 
 
 def cleanup_old_data(db: Session) -> None:
-    cutoff = utcnow() - timedelta(days=CACHE_TTL_DAYS)
-    old_requests = db.scalars(select(HashRequest).where(HashRequest.expires_at < utcnow())).all()
-    for row in old_requests:
-        db.delete(row)
-    old_comments = db.scalars(select(Comment).where(Comment.created_at < cutoff)).all()
-    for row in old_comments:
-        db.delete(row)
+    now = utcnow()
+    db.execute(delete(HashRequest).where(HashRequest.expires_at < now))
+    db.execute(delete(Comment).where(Comment.created_at < now - timedelta(days=CACHE_TTL_DAYS)))
     db.commit()
 
 
@@ -240,8 +247,13 @@ def build_history(db: Session) -> list[dict]:
         select(HashRequest).order_by(HashRequest.requested_at.desc()).limit(MAX_HISTORY)
     ).all()
     by_hash: dict[str, list[Comment]] = {}
-    for c in db.scalars(select(Comment).order_by(Comment.created_at.desc())).all():
-        by_hash.setdefault(c.hash, []).append(c)
+    shown = {r.hash for r in requests_}
+    if shown:
+        recent = select(Comment).where(Comment.hash.in_(shown)).order_by(Comment.created_at.desc()).limit(2000)
+        for c in db.scalars(recent).all():
+            bucket = by_hash.setdefault(c.hash, [])
+            if len(bucket) < 20:          # в истории показываем не больше 20 комментариев на хэш
+                bucket.append(c)
     return [
         {
             "requested_at": r.requested_at,
@@ -312,14 +324,16 @@ async def query_virustotal(file_hash: str) -> tuple[str, dict | None, str | None
             return "rate_limited", None, "VirusTotal вернул 429: превышена квота или rate limit."
         if response.status_code in (401, 403):
             return "auth_error", None, "VirusTotal отклонил API-ключ или доступ к API."
-        return "upstream_error", None, f"VirusTotal HTTP {response.status_code}: {response.text[:300]}"
+        logger.warning("VT upstream HTTP %s: %s", response.status_code, response.text[:300])
+        return "upstream_error", None, f"VirusTotal вернул HTTP {response.status_code}."
     except httpx.TimeoutException:
         return "timeout", None, "Таймаут при обращении к VirusTotal."
     except httpx.HTTPError as exc:
-        return "network_error", None, f"Ошибка сети: {exc}"
+        logger.warning("VT network error: %s", exc)
+        return "network_error", None, "Ошибка сети при обращении к VirusTotal."
     except Exception as exc:
         logger.exception("Unexpected VirusTotal error")
-        return "internal_error", None, f"Внутренняя ошибка: {exc}"
+        return "internal_error", None, "Внутренняя ошибка сервиса."
 
 
 @app.on_event("startup")
@@ -391,7 +405,7 @@ def index(request: Request, hash_value: str = Query("", alias="hash")):
 
 
 @app.post("/lookup", response_class=HTMLResponse)
-async def lookup(request: Request, hash_value: str = Form(...), refresh: str = Form("")):
+async def lookup(request: Request, hash_value: str = Form(..., max_length=128), refresh: str = Form("", max_length=8)):
     with SessionLocal() as db:
         cleanup_old_data(db)
 
@@ -427,6 +441,13 @@ async def lookup(request: Request, hash_value: str = Form(...), refresh: str = F
                 "result_hash": file_hash, "result_comments": comments_for(db, file_hash),
                 "requests_per_hour": REQUESTS_PER_HOUR,
             })
+
+        if not security.upstream_limiter.allow(security.client_ip(request)):
+            return templates.TemplateResponse("index.html", {
+                "request": request, "rows": build_history(db), "result": None,
+                "error": "Слишком много обращений к VirusTotal с вашего адреса. Попробуйте через час.",
+                "hash_value": file_hash, "requests_per_hour": REQUESTS_PER_HOUR,
+            }, status_code=429)
 
         if not await acquire_rate_slot():
             logger.warning("Application rate limit reached hash=%s", file_hash)
@@ -479,9 +500,12 @@ def comments_page(request: Request):
 @app.post("/comments")
 def add_comment(
     hash_value: str = Form(...),
-    text: str = Form(...),
-    author: str = Form("Anonymous"),
+    text: str = Form(..., max_length=4000),
+    author: str = Form("Anonymous", max_length=80),
+    website: str = Form(""),          # honeypot: человек это поле не видит и не заполняет
 ):
+    if website:
+        return RedirectResponse("/", status_code=303)   # бот: молча игнорируем
     try:
         file_hash, _ = normalize_hash(hash_value)
     except ValueError:
@@ -491,6 +515,11 @@ def add_comment(
     author = (author.strip() or "Anonymous")[:80]
     if text:
         with SessionLocal() as db:
+            total = db.scalar(select(func.count()).select_from(Comment)) or 0
+            per_hash = db.scalar(select(func.count()).select_from(Comment).where(Comment.hash == file_hash)) or 0
+            if total >= MAX_COMMENTS_TOTAL or per_hash >= MAX_COMMENTS_PER_HASH:
+                logger.warning("Comment cap reached hash=%s total=%s per_hash=%s", file_hash, total, per_hash)
+                return RedirectResponse(f"/?hash={file_hash}", status_code=303)
             db.add(Comment(hash=file_hash, author=author, text=text, created_at=utcnow()))
             db.commit()
         logger.info("Comment added hash=%s author=%s", file_hash, author)

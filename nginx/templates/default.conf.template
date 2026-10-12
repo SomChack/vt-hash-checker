@@ -1,0 +1,59 @@
+# VT Hash Checker — nginx reverse proxy + TLS termination.
+# Переменные ${...} подставляются официальным образом nginx из окружения контейнера
+# (см. /etc/nginx/templates в docker-entrypoint). Nginx-переменные ($host и т.д.)
+# остаются нетронутыми.
+
+# HTTP -> HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${SERVER_NAME};
+
+    server_tokens off;
+
+    # Let's Encrypt HTTP-01 challenge (webroot) для certbot
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${SERVER_NAME};
+
+    ssl_certificate     ${SSL_CERT};
+    ssl_certificate_key ${SSL_CERT_KEY};
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5:!RC4:!3DES;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    server_tokens off;
+
+    add_header Strict-Transport-Security "max-age=${HSTS_MAX_AGE}" always;
+
+    client_max_body_size 64k;
+
+    location / {
+        proxy_pass http://${APP_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # Перезаписываем, а не дополняем: nginx — граничный прокси, и клиентский
+        # X-Forwarded-For нельзя доверять (иначе обход per-IP лимитов).
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_hide_header Server;
+    }
+}

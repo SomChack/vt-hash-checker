@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>vt-hash-checker</title>
+  <rect width="64" height="64" rx="14" fill="#0f172a"/>
+  <path d="M32 9 L50 15 V30 C50 41.5 42.5 49.5 32 55 C21.5 49.5 14 41.5 14 30 V15 Z"
+        fill="#22c55e" stroke="#22c55e" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#0f172a" stroke-width="3.5" stroke-linecap="round" fill="none">
+    <path d="M28 22 V42"/>
+    <path d="M36 22 V42"/>
+    <path d="M23 28 H41"/>
+    <path d="M23 36 H41"/>
+  </g>
+</svg>

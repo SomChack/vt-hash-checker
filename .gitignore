@@ -2,6 +2,8 @@
 .env
 data/
 logs/
+nginx/certs/
+certbot/
 
 # Python
 __pycache__/

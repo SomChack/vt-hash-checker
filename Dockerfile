@@ -14,8 +14,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-RUN mkdir -p /data /logs
+# Файлы приложения должны читаться непривилегированным пользователем,
+# даже если на хосте у них узкие права (например, 600).
+RUN chmod -R a+rX /srv/app
+
+RUN useradd --system --uid 10001 --no-create-home appuser \
+    && mkdir -p /data /logs \
+    && chown -R appuser:appuser /data /logs
+
+USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header"]

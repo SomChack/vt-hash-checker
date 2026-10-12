@@ -201,3 +201,6 @@ th { color: #596671; font-size: 12px; }
   .wrap { padding: 12px; }
   .page-head { padding: 16px 12px 0; }
 }
+
+/* honeypot для ботов: скрыто от людей, без inline-стилей (совместимо с CSP) */
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
