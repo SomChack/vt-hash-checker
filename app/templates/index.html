@@ -123,6 +123,7 @@
     <form method="post" action="/comments" class="comment-form">
       <input type="hidden" name="hash_value" value="{{ result_hash }}">
       <input name="author" placeholder="Имя" maxlength="80">
+      <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
       <textarea name="text" placeholder="Комментарий..." maxlength="4000" required></textarea>
       <button type="submit">Добавить</button>
     </form>
