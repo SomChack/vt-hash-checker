@@ -71,26 +71,39 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-      - name: Upload compose file and nginx config
+      - name: Upload compose file, nginx config and scripts
         run: |
-          ssh "$SSH_USER@$SSH_HOST" "mkdir -p $DEPLOY_PATH/nginx/templates $DEPLOY_PATH/certbot/www $DEPLOY_PATH/certbot/conf"
-          scp docker-compose.prod.yml "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/docker-compose.yml"
+          ssh "$SSH_USER@$SSH_HOST" "mkdir -p $DEPLOY_PATH/nginx/templates $DEPLOY_PATH/certbot/www $DEPLOY_PATH/certbot/conf $DEPLOY_PATH/scripts"
+          scp docker-compose.prod.yml "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/docker-compose.prod.yml"
           scp nginx/templates/default.conf.template "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/nginx/templates/default.conf.template"
+          scp scripts/init-letsencrypt.sh "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/scripts/init-letsencrypt.sh"
+          ssh "$SSH_USER@$SSH_HOST" "chmod +x $DEPLOY_PATH/scripts/init-letsencrypt.sh"
+
+      # IMAGE и TAG сохраняем в .env на сервере, чтобы переменные были
+      # доступны при любом запуске docker compose — вручную, при ребуте и т.д.
+      - name: Write IMAGE/TAG into .env on server
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          TAG: ${{ github.sha }}
+        run: |
+          ssh "$SSH_USER@$SSH_HOST" "
+            cd $DEPLOY_PATH
+            touch .env
+            sed -i '/^IMAGE=/d;/^TAG=/d' .env
+            printf 'IMAGE=%s\nTAG=%s\n' '$IMAGE' '$TAG' >> .env
+          "
 
       # Токен уходит на сервер через stdin (не попадает в аргументы и логи)
       # и нужен только чтобы сервер мог скачать образ из приватного GHCR.
       - name: Pull new image and restart
         env:
-          IMAGE: ${{ needs.build.outputs.image }}
-          TAG: ${{ github.sha }}
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           printf '%s' "$REGISTRY_TOKEN" | ssh "$SSH_USER@$SSH_HOST" \
             "docker login ghcr.io -u $REGISTRY_USER --password-stdin \
              && cd $DEPLOY_PATH \
-             && export IMAGE=$IMAGE TAG=$TAG \
-             && docker compose pull \
-             && docker compose up -d \
-             && (docker compose exec -T nginx nginx -s reload || docker compose restart nginx) \
+             && docker compose -f docker-compose.prod.yml pull \
+             && docker compose -f docker-compose.prod.yml up -d \
+             && (docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload || docker compose -f docker-compose.prod.yml restart nginx) \
              && docker image prune -f"
