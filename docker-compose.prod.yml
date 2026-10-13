@@ -40,6 +40,9 @@ services:
       SSL_CERT_KEY: /etc/letsencrypt/live/vt-hash-checker.duckdns.org/privkey.pem
       APP_UPSTREAM: vt-hash-checker:8000
       HSTS_MAX_AGE: "31536000"   # после успешной проверки; начните с 300, затем поднимите
+      SERVER_NAME_2: xn--80adsnnlhibg.xn--p1ai
+      SSL_CERT_2: /etc/letsencrypt/live/xn--80adsnnlhibg.xn--p1ai/fullchain.pem
+      SSL_CERT_KEY_2: /etc/letsencrypt/live/xn--80adsnnlhibg.xn--p1ai/privkey.pem
     volumes:
       - ./nginx/templates:/etc/nginx/templates:ro
       - ./certbot/www:/var/www/certbot:ro
