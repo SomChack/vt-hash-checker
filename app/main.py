@@ -304,6 +304,23 @@ templates.env.globals["summarize"] = summarize_result
 templates.env.globals["cache_days"] = CACHE_TTL_DAYS
 templates.env.globals["css_version"] = _static_version("style.css")
 
+# Название сайта зависит от домена (заголовок Host, его передаёт nginx).
+# Формат переменной SITE_NAMES: "домен=Название;домен2=Название2".
+# Домены с кириллицей указываются в punycode. Остальные домены получают APP_NAME.
+SITE_NAMES: dict[str, str] = {}
+for _item in os.getenv("SITE_NAMES", "xn--80adsnnlhibg.xn--p1ai=вирустотал.рф").split(";"):
+    _host, _sep, _name = _item.partition("=")
+    if _sep and _host.strip() and _name.strip():
+        SITE_NAMES[_host.strip().lower()] = _name.strip()
+
+
+def site_name(request: Request) -> str:
+    host = (request.url.hostname or "").rstrip(".")   # без порта, в нижнем регистре
+    return SITE_NAMES.get(host, APP_NAME)
+
+
+templates.env.globals["site_name"] = site_name
+
 
 async def query_virustotal(file_hash: str) -> tuple[str, dict | None, str | None]:
     if not VT_API_KEY:
