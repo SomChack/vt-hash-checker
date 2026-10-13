@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{% block title %}VT Hash Checker{% endblock %}</title>
+  <title>{% block title %}{{ site_name(request) }}{% endblock %}</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="icon" href="/static/icon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="/static/icon-180.png">
@@ -14,7 +14,7 @@
 <div class="layout">
   <aside class="sidebar">
     <a class="brand" href="/">
-      <span class="brand-name">VT Hash Checker</span>
+      <span class="brand-name">{{ site_name(request) }}</span>
       <span class="brand-sub">Отчёты VirusTotal по хэшу</span>
     </a>
     <nav class="menu" aria-label="Разделы">

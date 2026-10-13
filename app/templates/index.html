@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 
-{% block title %}Проверка хэша · VT Hash Checker{% endblock %}
+{% block title %}Проверка хэша · {{ site_name(request) }}{% endblock %}
 {% block heading %}Проверка хэша{% endblock %}
 {% block subheading %}Поиск существующего отчёта VirusTotal по MD5 / SHA-1 / SHA-256{% endblock %}
 
