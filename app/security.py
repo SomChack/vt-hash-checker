@@ -56,7 +56,7 @@ class SlidingWindowLimiter:
 comment_limiter = SlidingWindowLimiter(limit=5, window=600)    # 5 комментариев / 10 минут
 lookup_limiter = SlidingWindowLimiter(limit=30, window=600)    # 30 проверок / 10 минут
 # Лимит именно на обращения к VirusTotal (кэш-попадания его не тратят)
-upstream_limiter = SlidingWindowLimiter(limit=5, window=3600)  # 5 запросов к VT / час
+upstream_limiter = SlidingWindowLimiter(limit=100, window=3600)  # 5 запросов к VT / час
 
 
 def client_ip(request: Request) -> str:
