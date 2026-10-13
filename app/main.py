@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
 import httpx
-from fastapi import FastAPI, Form, Query, Request
+from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -248,7 +248,7 @@ def build_history(db: Session) -> list[dict]:
     ).all()
     by_hash: dict[str, list[Comment]] = {}
     shown = {r.hash for r in requests_}
-    if shown:
+    if shown and COMMENTS_MODE >= 1:
         recent = select(Comment).where(Comment.hash.in_(shown)).order_by(Comment.created_at.desc()).limit(2000)
         for c in db.scalars(recent).all():
             bucket = by_hash.setdefault(c.hash, [])
@@ -268,6 +268,8 @@ def build_history(db: Session) -> list[dict]:
 
 
 def comments_for(db: Session, file_hash: str) -> list[Comment]:
+    if COMMENTS_MODE == 0:
+        return []
     return db.scalars(
         select(Comment).where(Comment.hash == file_hash).order_by(Comment.created_at.desc())
     ).all()
@@ -320,6 +322,26 @@ def site_name(request: Request) -> str:
 
 
 templates.env.globals["site_name"] = site_name
+
+
+# Режим комментариев (переменная COMMENTS_MODE):
+#   0 — комментарии скрыты, писать нельзя;
+#   1 — комментарии видны, писать нельзя;
+#   2 — комментарии видны и можно писать (по умолчанию, если переменная не задана).
+# Неверное значение считается самым строгим режимом 0 (и пишется в лог).
+def _parse_comments_mode(raw: str) -> int:
+    raw = raw.strip()
+    if raw == "":
+        return 2
+    if raw in ("0", "1", "2"):
+        return int(raw)
+    logger.warning("COMMENTS_MODE=%r не распознан (нужно 0, 1 или 2): комментарии скрыты (режим 0)", raw)
+    return 0
+
+
+COMMENTS_MODE = _parse_comments_mode(os.getenv("COMMENTS_MODE", "2"))
+templates.env.globals["comments_mode"] = COMMENTS_MODE
+logger.info("Comments mode: %s", COMMENTS_MODE)
 
 
 async def query_virustotal(file_hash: str) -> tuple[str, dict | None, str | None]:
@@ -502,6 +524,8 @@ async def lookup(request: Request, hash_value: str = Form(..., max_length=128), 
 @app.get("/comments", response_class=HTMLResponse)
 def comments_page(request: Request):
     """Вкладка «Комментарии»: все комментарии с именем файла и счётчиком детектов."""
+    if COMMENTS_MODE == 0:
+        raise HTTPException(status_code=404, detail="Not Found")
     with SessionLocal() as db:
         cleanup_old_data(db)
         items = db.scalars(select(Comment).order_by(Comment.created_at.desc()).limit(MAX_HISTORY)).all()
@@ -521,6 +545,8 @@ def add_comment(
     author: str = Form("Anonymous", max_length=80),
     website: str = Form(""),          # honeypot: человек это поле не видит и не заполняет
 ):
+    if COMMENTS_MODE != 2:
+        raise HTTPException(status_code=403, detail="Добавление комментариев отключено.")
     if website:
         return RedirectResponse("/", status_code=303)   # бот: молча игнорируем
     try:

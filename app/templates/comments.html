@@ -3,7 +3,7 @@
 
 {% block title %}Комментарии · {{ site_name(request) }}{% endblock %}
 {% block heading %}Комментарии{% endblock %}
-{% block subheading %}Заметки к проверенным хэшам. Новый комментарий добавляется под результатом проверки.{% endblock %}
+{% block subheading %}Заметки к проверенным хэшам.{% if comments_mode == 2 %} Новый комментарий добавляется под результатом проверки.{% else %} Добавление новых комментариев отключено.{% endif %}{% endblock %}
 
 {% block content %}
   <section class="card">
@@ -20,7 +20,7 @@
         <p class="ci-text">{{ c.text }}</p>
       </article>
     {% else %}
-      <p class="muted">Комментариев пока нет. Проверьте хэш и добавьте первый комментарий под результатом.</p>
+      <p class="muted">Комментариев пока нет.{% if comments_mode == 2 %} Проверьте хэш и добавьте первый комментарий под результатом.{% endif %}</p>
       <p><a class="hashlink" href="/">Перейти к проверке хэша</a></p>
     {% endfor %}
   </section>

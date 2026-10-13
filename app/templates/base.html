@@ -22,10 +22,12 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
         Проверка хэша
       </a>
+      {% if comments_mode >= 1 %}
       <a href="/comments" class="menu-item{% if on_comments %} active{% endif %}"{% if on_comments %} aria-current="page"{% endif %}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
         Комментарии
       </a>
+      {% endif %}
     </nav>
   </aside>
 

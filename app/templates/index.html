@@ -118,8 +118,10 @@
     </div>
   </section>
 
+  {% if comments_mode >= 1 %}
   <section class="card">
     <h3>Комментарии к {{ result_hash }}</h3>
+    {% if comments_mode == 2 %}
     <form method="post" action="/comments" class="comment-form">
       <input type="hidden" name="hash_value" value="{{ result_hash }}">
       <input name="author" placeholder="Имя" maxlength="80">
@@ -127,12 +129,16 @@
       <textarea name="text" placeholder="Комментарий..." maxlength="4000" required></textarea>
       <button type="submit">Добавить</button>
     </form>
+    {% else %}
+    <p class="muted">Добавление новых комментариев отключено.</p>
+    {% endif %}
     {% for c in result_comments %}
       <article class="comment"><b>{{ c.author }}</b><time>{{ c.created_at }}</time><p>{{ c.text }}</p></article>
     {% else %}
       <p class="muted">Комментариев пока нет.</p>
     {% endfor %}
   </section>
+  {% endif %}
   {% endif %}
 
   <section class="card">
@@ -142,7 +148,7 @@
         <thead>
           <tr>
             <th>Время</th><th>Hash</th><th>Тип</th><th>Статус</th>
-            <th>Детекты</th><th>Файл</th><th>Метка угрозы</th><th>Комментарии</th>
+            <th>Детекты</th><th>Файл</th><th>Метка угрозы</th>{% if comments_mode >= 1 %}<th>Комментарии</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -156,6 +162,7 @@
             <td>{{ m.score(sm) }}</td>
             <td class="cell-file">{% if sm and sm.file_name %}<span title="{{ sm.file_name }}">{{ sm.file_name }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
             <td>{% if sm and sm.threat_label %}<span class="chip threat">{{ sm.threat_label }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+            {% if comments_mode >= 1 %}
             <td class="cell-comments">
               {% if r.comments %}
               <div class="mini-comments" tabindex="0" role="region" aria-label="Комментарии к {{ r.hash }}">
@@ -164,9 +171,10 @@
               {% if r.comments|length > 1 %}<div class="muted more">Всего {{ r.comments|length }}, прокрутите список</div>{% endif %}
               {% else %}<span class="muted">—</span>{% endif %}
             </td>
+            {% endif %}
           </tr>
         {% else %}
-          <tr><td colspan="8" class="muted">История пуста.</td></tr>
+          <tr><td colspan="{{ 8 if comments_mode >= 1 else 7 }}" class="muted">История пуста.</td></tr>
         {% endfor %}
         </tbody>
       </table>
